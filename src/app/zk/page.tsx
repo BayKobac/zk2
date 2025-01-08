@@ -2,16 +2,9 @@
 
 export default function ZKPage() {
 
-  
-  
-
   const fetchReserves = async () => {
       alert("hi")
   };
-
-
-
-
 
 
   return (
