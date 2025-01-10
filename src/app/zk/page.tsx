@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { groth16 } from "snarkjs";
 
 function toAsciiArray20(str: string): number[] {
@@ -11,70 +11,97 @@ function toAsciiArray20(str: string): number[] {
   return arr;
 }
 
-export default function ZKPage() {
+export default function ZKWordPage() {
+  const [storedHash, setStoredHash] = useState<string | null>(null);
   const [guess, setGuess] = useState("");
   const [result, setResult] = useState("");
 
-  // 예: DB에 "12345678901234567890" 라고 저장됐다고 가정
-  const STORED_HASH = "12345678901234567890";
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await fetch("/zk/input.json").then((r) => r.json());
+        // data = { storedHash: "..." }
+        setStoredHash(data.storedHash);
+      } catch (err) {
+        console.error(err);
+        setResult("input.json loading fail");
+      }
+    })();
+  }, []);
 
   async function handleCheck() {
+    if (!storedHash) {
+      setResult("still loading");
+      return;
+    }
     try {
-      const wasmBytes = await fetch("/build/WordCheck_js/WordCheck.wasm").then(r=>r.arrayBuffer());
-      const zkeyBytes = await fetch("/build/WordCheck.zkey").then(r=>r.arrayBuffer());
+      // wasm, zkey
+      const wasmBuf = await fetch("/zk/WordCheck.wasm").then((r) => r.arrayBuffer());
+      const zkeyBuf = await fetch("/zk/WordCheck.zkey").then((r) => r.arrayBuffer());
 
-      // input
+      // circuit input
       const wordArr = toAsciiArray20(guess);
-      const input = {
+      const circuitInput = {
         word: wordArr,
-        storedHash: STORED_HASH
+        storedHash: storedHash
       };
 
-      // Proof
+      // fullProve
       const { proof, publicSignals } = await groth16.fullProve(
-        input,
-        new Uint8Array(wasmBytes),
-        new Uint8Array(zkeyBytes)
+        circuitInput,
+        new Uint8Array(wasmBuf),
+        new Uint8Array(zkeyBuf)
       );
 
-      console.log(proof, publicSignals);
+      console.log("proof:", proof);
+      console.log("publicSignals:", publicSignals);
+      // publicSignals[0] = isMatch
+
+      // verification_key
+      const vKey = await fetch("/zk/verification_key.json").then(r => r.json());
 
       // verify
-      const vKey = await fetch("/build/verification_key.json").then(r => r.json());
       const verified = await groth16.verify(vKey, publicSignals, proof);
-
       if (!verified) {
         setResult("❌ 검증 실패");
         return;
       }
+
+      // isMatch
       const isMatch = Number(publicSignals[0]);
       if (isMatch === 1) {
-        setResult("✅ 정답!");
+        setResult("✅ 정답! (storedHash 동일)");
       } else {
-        setResult("❌ 오답!");
+        setResult("❌ 오답");
       }
     } catch (err) {
       console.error(err);
-      setResult("에러: " + String(err));
+      setResult("에러 발생: " + String(err));
     }
   }
 
   return (
-    <div className="p-8 flex flex-col items-center">
-      <h1 className="mb-4 text-xl font-bold">ZK WordCheck</h1>
+    <div className="p-8 flex flex-col items-center justify-center min-h-screen">
+      <h1 className="text-2xl font-bold mb-4">ZK 단어 검증 (유저 입력 + input.json)</h1>
+
       <input
-        className="border px-3 py-2 mb-2 text-black"
+        className="border border-gray-300 px-3 py-2 text-black mb-2"
+        type="text"
         value={guess}
-        onChange={e=> setGuess(e.target.value)}
+        onChange={(e) => setGuess(e.target.value)}
         placeholder="단어 입력"
       />
+
       <button
         onClick={handleCheck}
         className="px-4 py-2 bg-blue-500 text-white rounded"
       >
-        ZK 증명
+        검증하기
       </button>
-      <div className="mt-4">{result}</div>
+
+      <div className="mt-4 text-lg font-semibold">
+        {result}
+      </div>
     </div>
   );
 }
